@@ -1,0 +1,73 @@
+@host = http://localhost:5222
+@token = paste-the-token-returned-by-sign-in
+
+POST {{host}}/api/v1/authentication/sign-up
+Content-Type: application/json
+
+{
+  "fullName": "Juan Pérez",
+  "email": "juan.carrier@trazza.pe",
+  "phone": "987654321",
+  "role": "carrier",
+  "password": "Trazza2026",
+  "documentNumber": "45678912"
+}
+
+###
+
+POST {{host}}/api/v1/authentication/sign-in
+Content-Type: application/json
+
+{
+  "email": "juan.carrier@trazza.pe",
+  "password": "Trazza2026"
+}
+
+###
+
+GET {{host}}/api/v1/carrier-profiles?userId=1
+Authorization: Bearer {{token}}
+
+###
+
+POST {{host}}/api/v1/carrier-profiles/1/vehicles
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "plate": "ABC123",
+  "brandModel": "Hyundai HD65",
+  "bodyType": "closed_van",
+  "capacityKg": 3500,
+  "volumeM3": 18
+}
+
+###
+
+POST {{host}}/api/v1/return-routes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "carrierId": 1,
+  "vehicleId": 1,
+  "origin": { "street": "Av. Javier Prado Este 1234", "district": "San Isidro" },
+  "destination": { "street": "Av. Primavera 456", "district": "Santiago de Surco" },
+  "departureDate": "2026-12-15",
+  "timeWindow": { "start": "08:00", "end": "12:00" },
+  "availableWeightKg": 1500,
+  "availableVolumeM3": 8,
+  "maxDetourKm": 10,
+  "acceptedCargoTypes": ["general", "textiles"]
+}
+
+###
+
+GET {{host}}/api/v1/return-routes/1/load-suggestions
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/v1/subscription-plans
+
+###
