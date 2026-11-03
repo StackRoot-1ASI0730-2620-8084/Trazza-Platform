@@ -1,0 +1,417 @@
+@startuml Trazza.Platform Class Diagram
+
+title
+    Trazza.Platform
+    Class Diagram (v1.0.0)
+    Shared, IAM, Profiles, Matchmaking, Execution, Billing, Reputation
+end title
+
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide empty members
+
+package "Shared Bounded Context" as Shared {
+    interface "IEntityId<T>" as IEntityId {
+        +Value: T
+    }
+    interface IEvent
+    interface IAggregateRoot {
+        +DomainEvents: IReadOnlyCollection<IEvent>
+        +ClearDomainEvents(): void
+    }
+    abstract class AggregateRoot implements IAggregateRoot {
+        -domainEvents: List<IEvent>
+        #AddDomainEvent(domainEvent: IEvent): void
+    }
+    interface IAuditableEntity {
+        +CreatedAt: DateTimeOffset?
+        +UpdatedAt: DateTimeOffset?
+    }
+    enum EErrorType {
+        Failure
+        Validation
+        NotFound
+        Conflict
+        Unauthorized
+        Forbidden
+        Unexpected
+    }
+    class Error <<record>> {
+        +Code: string
+        +Message: string
+        +Type: EErrorType
+    }
+    class "Result<T>" as Result {
+        +IsSuccess: bool
+        +Value: T?
+        +DomainError: Error
+        +Match(onSuccess, onFailure): TResult
+    }
+    class Money <<value object>> {
+        +Amount: decimal
+        +Currency: string
+        +IsValid: bool
+        +Formatted: string
+        +Add(other: Money): Money
+        +Multiply(factor: decimal): Money
+    }
+    class Address <<value object>> {
+        +Street: string
+        +District: string
+        +IsValid: bool
+        +Location: GeoLocation
+        +IsSamePlaceAs(other: Address): bool
+    }
+    class GeoLocation <<value object>> {
+        +Latitude: double
+        +Longitude: double
+        +DistanceTo(other: GeoLocation): double
+        +MoveTowards(target: GeoLocation, fraction: double): GeoLocation
+        +DistanceToSegment(start: GeoLocation, end: GeoLocation): double
+    }
+    class LimaDistricts <<static>> {
+        +Names: IReadOnlyList<string>
+        +Contains(district: string): bool
+        +LocationOf(district: string): GeoLocation
+    }
+    Result --> Error
+    Error --> EErrorType
+    Address ..> LimaDistricts
+    Address ..> GeoLocation
+}
+
+package "IAM Bounded Context" as Iam {
+    class User <<aggregate root>> {
+        +Id: UserId
+        +FullName: string
+        +Email: EmailAddress
+        +Phone: PhoneNumber
+        +Role: UserRole
+        +PasswordHash: string
+        +UpdateContact(fullName, phone): User
+    }
+    class EmailAddress <<value object>>
+    class "PhoneNumber" as IamPhone <<value object>>
+    class UserRole <<value object>> {
+        +Value: string
+        +IsCarrier: bool
+        +IsMerchant: bool
+    }
+    class UserRegisteredEvent <<event>>
+    class UserContactUpdatedEvent <<event>>
+    interface IUserCommandService
+    interface IUserQueryService
+    interface ITokenService
+    interface IHashingService
+    interface IIamContextFacade
+    User --> EmailAddress
+    User --> IamPhone
+    User --> UserRole
+    User ..> UserRegisteredEvent
+    User ..> UserContactUpdatedEvent
+}
+
+package "Profiles Bounded Context" as Profiles {
+    class CarrierProfile <<aggregate root>> {
+        +Id: CarrierProfileId
+        +UserId: UserId
+        +FullName: string
+        +Dni: Dni
+        +Phone: PhoneNumber
+        +Verified: bool
+        +Vehicles: IReadOnlyCollection<Vehicle>
+        +AddVehicle(...): Error
+        +UpdateVehicle(...): Error
+        +RemoveVehicle(vehicleId): Error
+    }
+    class Vehicle <<entity>> {
+        +Id: VehicleId
+        +Plate: LicensePlate
+        +BrandModel: string
+        +BodyType: VehicleBodyType
+        +Capacity: LoadCapacity
+        +Active: bool
+        +Label: string
+    }
+    class MerchantProfile <<aggregate root>> {
+        +Id: MerchantProfileId
+        +UserId: UserId
+        +BusinessName: string
+        +ContactName: string
+        +Ruc: Ruc
+        +Phone: PhoneNumber
+        +Verified: bool
+    }
+    class Dni <<value object>>
+    class Ruc <<value object>> {
+        +IsCompany: bool
+    }
+    class LicensePlate <<value object>>
+    class LoadCapacity <<value object>> {
+        +WeightKg: double
+        +VolumeM3: double
+        +CanHold(weightKg, volumeM3): bool
+    }
+    class VehicleBodyType <<value object>>
+    interface IProfilesContextFacade
+    CarrierProfile "1" *-- "0..*" Vehicle
+    CarrierProfile --> Dni
+    MerchantProfile --> Ruc
+    Vehicle --> LicensePlate
+    Vehicle --> LoadCapacity
+    Vehicle --> VehicleBodyType
+}
+
+package "Matchmaking Bounded Context" as Matchmaking {
+    class ReturnRoute <<aggregate root>> {
+        +Id: ReturnRouteId
+        +CarrierId: CarrierId
+        +VehicleId: VehicleId
+        +Origin: Address
+        +Destination: Address
+        +DepartureDate: DateOnly
+        +TimeWindow: TimeWindow
+        +AvailableWeightKg: double
+        +AvailableVolumeM3: double
+        +MaxDetourKm: double
+        +AcceptedCargoTypes: List<CargoType>
+        +Status: ERouteStatus
+        +CanCarry(weightKg, volumeM3): bool
+        +ReserveCapacity(weightKg, volumeM3): Error
+        +Close(): Error
+    }
+    class FreightRequest <<aggregate root>> {
+        +Id: FreightRequestId
+        +Code: string
+        +MerchantId: MerchantId
+        +Pickup: Address
+        +Delivery: Address
+        +PickupDate: DateOnly
+        +PickupWindow: TimeWindow
+        +Cargo: Cargo
+        +OfferedRate: Money?
+        +Status: ERequestStatus
+        +Publish(): Error
+        +MarkMatched(): Error
+        +Cancel(): Error
+    }
+    class MatchProposal <<aggregate root>> {
+        +Id: MatchProposalId
+        +InitiatedBy: ENegotiationParty
+        +CurrentRate: Money
+        +PreviousRate: Money?
+        +LastOfferBy: ENegotiationParty
+        +Status: EProposalStatus
+        +Detour: Detour
+        +Accept(by): Error
+        +Counter(rate, by): Error
+        +Reject(): Error
+        +Confirm(by, request, route): Error
+        +Close(): void
+    }
+    class TimeWindow <<value object>> {
+        +Start: string
+        +End: string
+        +Overlaps(other): bool
+    }
+    class Cargo <<value object>> {
+        +Type: CargoType
+        +WeightKg: double
+        +VolumeM3: double
+        +Description: string
+    }
+    class CargoType <<value object>>
+    class Detour <<value object>> {
+        +DistanceKm: double
+        +DurationMinutes: int
+        +IsWithin(maxKm): bool
+    }
+    enum ERouteStatus {
+        Active
+        Matched
+        Closed
+    }
+    enum ERequestStatus {
+        Draft
+        Open
+        Matched
+        Cancelled
+    }
+    enum EProposalStatus {
+        Pending
+        Counteroffer
+        Accepted
+        Matched
+        Rejected
+        Closed
+    }
+    interface IRouteMatchingService {
+        +EstimateTrip(from, to): TripEstimation
+        +CalculateDetour(route, request): Detour
+        +Evaluate(route, request, maxDetourKm): MatchEvaluation
+    }
+    class RouteMatchingService <<domain service>> implements IRouteMatchingService
+    class MatchProposalConfirmedEvent <<event>>
+    ReturnRoute --> TimeWindow
+    ReturnRoute --> ERouteStatus
+    FreightRequest --> Cargo
+    FreightRequest --> ERequestStatus
+    Cargo --> CargoType
+    MatchProposal --> Detour
+    MatchProposal --> EProposalStatus
+    MatchProposal ..> FreightRequest
+    MatchProposal ..> ReturnRoute
+    MatchProposal ..> MatchProposalConfirmedEvent
+    RouteMatchingService ..> ReturnRoute
+    RouteMatchingService ..> FreightRequest
+}
+
+package "Execution Bounded Context" as Execution {
+    class Shipment <<aggregate root>> {
+        +Id: ShipmentId
+        +Code: string
+        +ProposalId: ProposalId
+        +CarrierId: CarrierId
+        +MerchantId: MerchantId
+        +Pickup: Address
+        +Delivery: Address
+        +Rate: Money
+        +Status: EShipmentStatus
+        +CurrentLocation: GeoLocation?
+        +DeviationKm: double?
+        +EtaMinutes: int?
+        +ConfirmPickup(): Error
+        +UpdateLocation(location): Error
+        +ConfirmDelivery(acknowledgeDistance): Error
+        +ConfirmReception(): Error
+        +Cancel(): Error
+        +ReportIncident(...): Error
+    }
+    class Incident <<entity>> {
+        +Id: IncidentId
+        +Type: IncidentType
+        +Description: string
+        +ReporterRole: EPartyRole
+        +Status: EIncidentStatus
+        +Resolve(): Error
+    }
+    class ShipmentEvent <<entity>> {
+        +Type: EShipmentEventType
+        +OccurredAt: DateTimeOffset
+        +Details: string
+    }
+    enum EShipmentStatus {
+        Matched
+        PickedUp
+        InTransit
+        Delivered
+        Closed
+        Cancelled
+    }
+    class IncidentType <<value object>>
+    interface IExecutionContextFacade
+    Shipment "1" *-- "0..*" Incident
+    Shipment "1" *-- "1..*" ShipmentEvent
+    Shipment --> EShipmentStatus
+    Incident --> IncidentType
+}
+
+package "Billing Bounded Context" as Billing {
+    class PaymentTransaction <<aggregate root>> {
+        +Id: PaymentTransactionId
+        +UserId: UserId
+        +Plan: SubscriptionPlan
+        +Amount: Money
+        +Method: PaymentMethod
+        +Status: EPaymentStatus
+        +PeriodStart: DateOnly?
+        +PeriodEnd: DateOnly?
+        +MarkPaid(code, now): Error
+        +MarkFailed(): Error
+        +Covers(today): bool
+    }
+    class Receipt <<aggregate root>> {
+        +Id: ReceiptId
+        +TransactionId: PaymentTransactionId
+        +Type: ReceiptType
+        +Number: int
+        +Total: Money
+        +Code: string
+        +Subtotal: Money
+        +Igv: Money
+    }
+    class SubscriptionPlan <<value object>> {
+        +Code: string
+        +Price: Money
+        +MonthlyPublications: int?
+        +AllowsPublication(used): bool
+    }
+    class PaymentMethod <<value object>> {
+        +Brand: string
+        +Last4: string
+        +HolderName: string
+        +Expiry: string
+    }
+    class ReceiptType <<value object>> {
+        +Series: string
+        +AcceptsDocument(document): bool
+    }
+    interface IPaymentGateway
+    interface IBillingContextFacade
+    PaymentTransaction --> SubscriptionPlan
+    PaymentTransaction --> PaymentMethod
+    Receipt --> ReceiptType
+    Receipt ..> PaymentTransaction
+}
+
+package "Reputation Bounded Context" as Reputation {
+    class Rating <<aggregate root>> {
+        +Id: RatingId
+        +ShipmentId: ShipmentId
+        +RaterId: RaterId
+        +Target: RatingTarget
+        +Score: Score
+        +Tags: List<string>
+        +Comment: string
+    }
+    class RatingTarget <<value object>> {
+        +UserId: RatedUserId
+        +Role: string
+        +Name: string
+        +AllowsTag(tag): bool
+    }
+    class Score <<value object>> {
+        +Value: int
+        +IsPositive: bool
+    }
+    class ReputationSummary <<read model>>
+    Rating --> RatingTarget
+    Rating --> Score
+}
+
+User --|> AggregateRoot
+CarrierProfile --|> AggregateRoot
+MerchantProfile --|> AggregateRoot
+ReturnRoute --|> AggregateRoot
+FreightRequest --|> AggregateRoot
+MatchProposal --|> AggregateRoot
+Shipment --|> AggregateRoot
+PaymentTransaction --|> AggregateRoot
+Receipt --|> AggregateRoot
+Rating --|> AggregateRoot
+
+ReturnRoute --> Address
+FreightRequest --> Address
+Shipment --> Address
+Shipment --> GeoLocation
+MatchProposal --> Money
+PaymentTransaction --> Money
+
+UserRegisteredEvent ..> CarrierProfile : creates
+UserRegisteredEvent ..> MerchantProfile : creates
+MatchProposalConfirmedEvent ..> Shipment : opens
+ReturnRoute ..> IProfilesContextFacade : vehicle capacity
+FreightRequest ..> IBillingContextFacade : publication limit
+Rating ..> IExecutionContextFacade : shipment parties
+
+@enduml
